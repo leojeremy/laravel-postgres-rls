@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }} / Postgres ${{ matrix.postgres }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { php: '8.3', laravel: '12', testbench: '^10.0', postgres: '15' }
+          - { php: '8.4', laravel: '13', testbench: '^11.0', postgres: '17' }
+          - { php: '8.5', laravel: '13', testbench: '^11.0', postgres: '18' }
+
+    services:
+      # The image's bootstrap user is always a superuser, and superusers
+      # skip every row-level security policy. It is only used to create the
+      # app role below and to run the superuser trap tests.
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: rls_app
+      DB_PASSWORD: rls_app
+      DB_SUPERUSER_USERNAME: postgres
+      DB_SUPERUSER_PASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_pgsql, pdo_sqlite
+          coverage: none
+
+      # The tests connect as a plain role (NOSUPERUSER NOBYPASSRLS) that owns
+      # the tables, exactly like the app should. As the bootstrap superuser
+      # every isolation test would pass for nothing.
+      - name: Create the app role and databases
+        env:
+          PGPASSWORD: postgres
+        run: psql -h 127.0.0.1 -U postgres -v ON_ERROR_STOP=1 -f docker/postgres/init.sql
+
+      - name: Install dependencies (Laravel ${{ matrix.laravel }})
+        run: |
+          composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-update --no-interaction
+          composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Pint
+        run: vendor/bin/pint --test
+
+      - name: Tests
+        run: vendor/bin/pest
+
+      - name: Demo
+        env:
+          DB_DATABASE: rls_demo
+        run: php artisan rls:demo

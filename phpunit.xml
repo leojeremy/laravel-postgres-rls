@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true">
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>src</directory>
+        </include>
+    </source>
+    <php>
+        <!--
+            The suite must connect as a role that is NOT a superuser and does
+            NOT hold BYPASSRLS, or every isolation test passes for nothing.
+            tests/Feature/SuiteRoleTest.php fails loudly if it does.
+            Real environment variables override these (force="false").
+        -->
+        <env name="DB_CONNECTION" value="pgsql" force="false"/>
+        <env name="DB_HOST" value="127.0.0.1" force="false"/>
+        <env name="DB_PORT" value="54320" force="false"/>
+        <env name="DB_DATABASE" value="rls_test" force="false"/>
+        <env name="DB_USERNAME" value="rls_app" force="false"/>
+        <env name="DB_PASSWORD" value="rls_app" force="false"/>
+        <!-- Optional: the superuser tests are skipped when this is empty. -->
+        <env name="DB_SUPERUSER_USERNAME" value="postgres" force="false"/>
+        <env name="DB_SUPERUSER_PASSWORD" value="postgres" force="false"/>
+    </php>
+</phpunit>

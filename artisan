@@ -1,0 +1,19 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// `php artisan` for this package: boots the demo app in workbench/ through
+// Orchestra Testbench (the same thing as vendor/bin/testbench).
+
+require __DIR__.'/vendor/autoload.php';
+
+define('TESTBENCH_CORE', true);
+define('TESTBENCH_WORKING_PATH', __DIR__);
+
+$config = Orchestra\Testbench\Foundation\Config::loadFromYaml(
+    workingPath: __DIR__,
+    defaults: ['providers' => [], 'dont-discover' => []],
+);
+
+(new Orchestra\Testbench\Console\Commander($config, __DIR__))->handle();

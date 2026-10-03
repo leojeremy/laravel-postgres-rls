@@ -1,0 +1,60 @@
+{
+    "name": "leojeremy/laravel-postgres-rls",
+    "description": "PostgreSQL row-level security as the tenant boundary for Laravel, with an audit command that catches the setups where RLS looks on but is off.",
+    "keywords": ["laravel", "postgres", "postgresql", "row-level-security", "rls", "multi-tenancy", "tenancy"],
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Jeremy Leo",
+            "homepage": "https://github.com/leojeremy"
+        }
+    ],
+    "require": {
+        "php": "^8.3",
+        "illuminate/console": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0"
+    },
+    "require-dev": {
+        "laravel/pint": "^1.20",
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^4.0|^5.0",
+        "stancl/tenancy": "^3.9"
+    },
+    "suggest": {
+        "stancl/tenancy": "Use LeoJeremy\\PostgresRls\\Stancl\\StanclTenantContext and RlsBootstrapper to drive the RLS session variable from stancl/tenancy."
+    },
+    "autoload": {
+        "psr-4": {
+            "LeoJeremy\\PostgresRls\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "LeoJeremy\\PostgresRls\\Tests\\": "tests/",
+            "Workbench\\App\\": "workbench/app/",
+            "Workbench\\Database\\": "workbench/database/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "LeoJeremy\\PostgresRls\\PostgresRlsServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "lint": "pint --test",
+        "demo": "@php artisan rls:demo"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

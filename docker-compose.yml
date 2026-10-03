@@ -1,0 +1,22 @@
+# Postgres for the demo and the test suite.
+#
+# The image's bootstrap user (postgres) is a superuser, and superusers skip
+# every row-level security policy. docker/postgres/init.sql therefore
+# creates a plain rls_app role that owns the databases; the app and the
+# tests connect as that role. The postgres user is only used to show what
+# the audit says about a superuser.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "${RLS_DB_PORT:-54320}:5432"
+    volumes:
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rls_demo"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

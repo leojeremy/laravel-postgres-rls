@@ -1,0 +1,25 @@
+# Lets `php artisan` in this repo boot the demo app in workbench/.
+laravel: '@testbench'
+
+providers:
+  - LeoJeremy\PostgresRls\PostgresRlsServiceProvider
+  - Workbench\App\Providers\WorkbenchServiceProvider
+
+env:
+  - DB_CONNECTION=pgsql
+  - DB_HOST=127.0.0.1
+  - DB_PORT=54320
+  - DB_DATABASE=rls_demo
+  - DB_USERNAME=rls_app
+  - DB_PASSWORD=rls_app
+  - DB_SUPERUSER_USERNAME=postgres
+  - DB_SUPERUSER_PASSWORD=postgres
+
+workbench:
+  install: false
+  discovers:
+    web: false
+    api: false
+    commands: false
+    components: false
+    views: false
