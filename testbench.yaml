@@ -6,6 +6,7 @@ providers:
   - Workbench\App\Providers\WorkbenchServiceProvider
 
 env:
+  - CACHE_STORE=array
   - DB_CONNECTION=pgsql
   - DB_HOST=127.0.0.1
   - DB_PORT=54320

@@ -84,7 +84,7 @@ final class ModelTableResolver
         return null;
     }
 
-    /** @param  list<\PhpToken>  $tokens */
+    /** @param  array<int, \PhpToken>  $tokens */
     private static function nextName(array $tokens, int $i): ?string
     {
         for ($j = $i + 1, $n = count($tokens); $j < $n; $j++) {
@@ -101,7 +101,7 @@ final class ModelTableResolver
     /**
      * `Foo::class` and `new class` are not declarations.
      *
-     * @param  list<\PhpToken>  $tokens
+     * @param  array<int, \PhpToken>  $tokens
      */
     private static function isClassConstant(array $tokens, int $i): bool
     {

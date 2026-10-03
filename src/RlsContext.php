@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace LeoJeremy\PostgresRls;
 
 use Closure;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Bus\PendingDispatch;
 use LeoJeremy\PostgresRls\Contracts\TenantContext;
+use LeoJeremy\PostgresRls\Exceptions\TenantSessionMismatch;
 
 /**
  * The one sanctioned way to run code as a tenant (or as nobody) outside
@@ -39,12 +42,13 @@ final class RlsContext
     /**
      * @template TReturn
      *
+     * @param  int|string|Model  $tenant  a tenant key, or the tenant model itself
      * @param  Closure(): TReturn  $fn
      * @return TReturn
      */
-    public function within(int|string $tenantKey, Closure $fn): mixed
+    public function within(int|string|Model $tenant, Closure $fn): mixed
     {
-        $key = $this->keyType->normalise($tenantKey);
+        $key = $this->keyType->normalise(self::keyOf($tenant));
 
         return $this->unitOfWork(function () use ($key, $fn): mixed {
             $previous = $this->tenants->currentKey();
@@ -53,7 +57,7 @@ final class RlsContext
             $this->session->set($key, $this->local());
 
             try {
-                return $fn();
+                return self::settle($fn());
             } finally {
                 $this->restore($previous);
             }
@@ -62,8 +66,9 @@ final class RlsContext
 
     /**
      * The inverse: run code with no tenant in scope, then put back whatever
-     * was in scope before. With no tenant set, every tenant_isolation policy
-     * matches nothing, so this is for central tables only.
+     * was in scope before. With no tenant set, tenant rows are invisible:
+     * this is for central tables, and for the NULL-tenant rows of tables
+     * protected with allowCentral.
      *
      * @template TReturn
      *
@@ -79,14 +84,14 @@ final class RlsContext
             // scheduled commands take, and it keeps them free of session
             // writes that a rollback could undo behind PHP's back.
             if ($previous === null && $this->session->current() === null) {
-                return $fn();
+                return self::settle($fn());
             }
 
             $this->tenants->end();
             $this->session->clear($this->local());
 
             try {
-                return $fn();
+                return self::settle($fn());
             } finally {
                 $this->restore($previous);
             }
@@ -101,6 +106,65 @@ final class RlsContext
     public function mode(): Mode
     {
         return $this->mode;
+    }
+
+    /**
+     * Check what the DATABASE thinks the current tenant is before a
+     * statement that is only correct because RLS scopes it, typically an
+     * unconditional `DELETE FROM table` used to purge one tenant.
+     *
+     * "Some tenant is active" is not the same claim as "the tenant we were
+     * asked to destroy is active": a stale value on a reused connection, or
+     * no value at all on a table with central rows, turns that DELETE into
+     * a different tenant's data, or the central rows. One SELECT turns the
+     * assumption into a checked precondition.
+     *
+     * @param  int|string|Model|null  $expected  null asserts the central (no tenant) session
+     *
+     * @throws TenantSessionMismatch
+     */
+    public function assertRunningAs(int|string|Model|null $expected, string $operation): void
+    {
+        $want = $expected === null ? null : $this->keyType->normalise(self::keyOf($expected));
+        $actual = $this->session->current();
+
+        if ($want !== $actual) {
+            throw TenantSessionMismatch::during($operation, $want, $actual);
+        }
+    }
+
+    /**
+     * `fn () => SomeJob::dispatch()` returns a PendingDispatch, which only
+     * dispatches when it is destroyed: after this block has already put
+     * the previous tenant back. Nested inside another tenant's block, the
+     * job would be stamped with the OUTER tenant. Destroy it here, inside
+     * the block, so it dispatches with the tenant it was written for.
+     */
+    private static function settle(mixed $result): mixed
+    {
+        if ($result instanceof PendingDispatch) {
+            unset($result);
+
+            return null;
+        }
+
+        return $result;
+    }
+
+    private static function keyOf(int|string|Model $tenant): int|string
+    {
+        if (! $tenant instanceof Model) {
+            return $tenant;
+        }
+
+        // stancl's tenant models expose getTenantKey(); plain models getKey().
+        $key = method_exists($tenant, 'getTenantKey') ? $tenant->getTenantKey() : $tenant->getKey();
+
+        if (! is_int($key) && ! is_string($key)) {
+            throw new \InvalidArgumentException(sprintf('Tenant model %s has no key yet. Save it first.', $tenant::class));
+        }
+
+        return $key;
     }
 
     private function restore(int|string|null $previous): void

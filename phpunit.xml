@@ -23,6 +23,7 @@
             tests/Feature/SuiteRoleTest.php fails loudly if it does.
             Real environment variables override these (force="false").
         -->
+        <env name="CACHE_STORE" value="array" force="false"/>
         <env name="DB_CONNECTION" value="pgsql" force="false"/>
         <env name="DB_HOST" value="127.0.0.1" force="false"/>
         <env name="DB_PORT" value="54320" force="false"/>

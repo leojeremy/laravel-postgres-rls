@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace LeoJeremy\PostgresRls;
 
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
 
 /**
  * Schema helpers for migrations.
@@ -14,9 +14,9 @@ use Illuminate\Database\ConnectionInterface;
  */
 final class RlsSchema
 {
-    public function __construct(private readonly ConnectionInterface $db) {}
+    public function __construct(private readonly Connection $db) {}
 
-    public static function on(ConnectionInterface $db): self
+    public static function on(Connection $db): self
     {
         return new self($db);
     }
@@ -31,14 +31,35 @@ final class RlsSchema
     {
         // No CASCADE: if a table still has a tenant_isolation policy this
         // fails, which is the right order. Drop the tables' RLS first.
-        $this->db->statement('DROP FUNCTION IF EXISTS enable_rls_for(regclass)');
+        $this->db->statement('DROP FUNCTION IF EXISTS enable_rls_for(regclass, boolean)');
         $this->db->statement('DROP FUNCTION IF EXISTS current_tenant_id()');
     }
 
-    /** ENABLE + FORCE row level security and (re)create the tenant_isolation policy. */
-    public function enable(string $table): void
+    /**
+     * ENABLE + FORCE row level security and (re)create the tenant_isolation
+     * policy.
+     *
+     * $allowCentral adds central rows: rows with a NULL tenant_id that only
+     * a session with NO tenant set can see or write (a platform audit log,
+     * shared templates). Read the README's "central rows" section first:
+     * with this policy, "no tenant" no longer means "no rows".
+     */
+    public function enable(string $table, bool $allowCentral = false): void
     {
-        $this->db->select('SELECT enable_rls_for(?::regclass)', [$table]);
+        $this->db->select(
+            sprintf('SELECT enable_rls_for(?::regclass, %s)', $allowCentral ? 'true' : 'false'),
+            [$table],
+        );
+    }
+
+    /** The inverse of enable(), for down() migrations. */
+    public function disable(string $table): void
+    {
+        $wrapped = $this->db->getQueryGrammar()->wrapTable($table);
+
+        $this->db->statement("DROP POLICY IF EXISTS tenant_isolation ON {$wrapped}");
+        $this->db->statement("ALTER TABLE {$wrapped} NO FORCE ROW LEVEL SECURITY");
+        $this->db->statement("ALTER TABLE {$wrapped} DISABLE ROW LEVEL SECURITY");
     }
 
     /**
@@ -55,24 +76,40 @@ final class RlsSchema
     }
 
     /** enable() + defaultTenantColumn(): what most tenant tables need. */
-    public function protect(string $table): void
+    public function protect(string $table, bool $allowCentral = false): void
     {
-        $this->enable($table);
+        $this->enable($table, $allowCentral);
         $this->defaultTenantColumn($table);
     }
 
+    /** @return literal-string */
     public static function installSql(KeyType $keyType): string
     {
-        // $keyType->value is one of three enum literals, never user input.
-        $type = $keyType->value;
+        // One of three literals, never user input.
+        $type = match ($keyType) {
+            KeyType::Bigint => 'bigint',
+            KeyType::Uuid => 'uuid',
+            KeyType::Text => 'text',
+        };
 
         return <<<SQL
             CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS {$type} AS \$\$
                 SELECT NULLIF(current_setting('app.current_tenant_id', true), '')::{$type}
             \$\$ LANGUAGE sql STABLE;
 
-            CREATE OR REPLACE FUNCTION enable_rls_for(target regclass) RETURNS void AS \$\$
+            -- An earlier one-argument version is replaced, not overloaded.
+            DROP FUNCTION IF EXISTS enable_rls_for(regclass);
+
+            CREATE OR REPLACE FUNCTION enable_rls_for(target regclass, allow_central boolean DEFAULT false)
+            RETURNS void AS \$\$
+            DECLARE
+                rule text := 'tenant_id = current_tenant_id()';
             BEGIN
+                IF allow_central THEN
+                    -- NULL-tenant rows belong to the central (no tenant) session.
+                    rule := '(tenant_id IS NULL AND current_tenant_id() IS NULL) OR ' || rule;
+                END IF;
+
                 EXECUTE format('ALTER TABLE %s ENABLE ROW LEVEL SECURITY', target);
                 -- FORCE makes the policy apply to the table owner too. Without
                 -- it the role that ran the migrations (usually the app's own
@@ -82,10 +119,8 @@ final class RlsSchema
                 -- migration) replaces the policy instead of erroring.
                 EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %s', target);
                 EXECUTE format(
-                    'CREATE POLICY tenant_isolation ON %s '
-                    || 'USING (tenant_id = current_tenant_id()) '
-                    || 'WITH CHECK (tenant_id = current_tenant_id())',
-                    target
+                    'CREATE POLICY tenant_isolation ON %s USING (%s) WITH CHECK (%s)',
+                    target, rule, rule
                 );
             END;
             \$\$ LANGUAGE plpgsql;

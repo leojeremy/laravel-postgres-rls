@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace LeoJeremy\PostgresRls\Testing;
 
-use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 
 /**
@@ -29,7 +29,7 @@ final class CrossTenantProbe
     private array $fillers = [];
 
     public function __construct(
-        private readonly ConnectionInterface $db,
+        private readonly Connection $db,
         private readonly string $schema = 'public',
     ) {}
 
@@ -63,7 +63,7 @@ final class CrossTenantProbe
             SQL, [$this->schema]);
 
         return array_values(array_filter(
-            array_map(fn (object $row): string => $row->table_name, $rows),
+            array_map(fn (\stdClass $row): string => (string) $row->table_name, $rows),
             fn (string $table): bool => ! in_array($table, $ignored, true),
         ));
     }

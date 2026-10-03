@@ -5,14 +5,17 @@ declare(strict_types=1);
 namespace LeoJeremy\PostgresRls\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Database\Connection;
 use Illuminate\Database\ConnectionResolverInterface;
+use LeoJeremy\PostgresRls\Audit\TableReport;
 use LeoJeremy\PostgresRls\Contracts\Auditor;
 
 final class AuditCommand extends Command
 {
     protected $signature = 'rls:audit
         {--database= : Connection to audit (defaults to rls.connection, then the default connection)}
-        {--ignore=* : Table names to skip, on top of rls.audit.ignored_tables}';
+        {--ignore=* : Table names to skip, on top of rls.audit.ignored_tables}
+        {--strict : Fail on warnings too (missing tenant_id index, unique indexes across tenants)}';
 
     protected $description = 'Check that the database role and every tenant_id table actually enforce row-level security.';
 
@@ -21,7 +24,7 @@ final class AuditCommand extends Command
         $name = $this->option('database') ?: config('rls.connection');
         $connection = $db->connection($name);
 
-        if ($connection->getDriverName() !== 'pgsql') {
+        if (! $connection instanceof Connection || $connection->getDriverName() !== 'pgsql') {
             $this->components->error('The RLS audit only runs on Postgres connections.');
 
             return self::FAILURE;
@@ -55,28 +58,56 @@ final class AuditCommand extends Command
             return self::SUCCESS;
         }
 
-        if ($report->passes()) {
-            $this->components->info(sprintf(
-                'All %d tenant table(s) enforce RLS, and role [%s] is subject to it.',
-                count($report->tenantTables),
-                $auditor->role()->name,
-            ));
-
-            return self::SUCCESS;
+        if (! $report->passes()) {
+            $this->reportFailures($report);
         }
 
-        if ($report->unisolated !== []) {
-            $this->components->error(sprintf(
-                '%d tenant table(s) without an enabled and FORCEd tenant_isolation policy:',
-                count($report->unisolated),
-            ));
+        $this->reportWarnings($report);
 
-            foreach ($report->unisolated as $table) {
-                $this->line("  - {$table}");
+        if (! $report->passes()) {
+            return self::FAILURE;
+        }
+
+        if ($report->hasWarnings() && $this->option('strict')) {
+            $this->components->error('Warnings are failures under --strict.');
+
+            return self::FAILURE;
+        }
+
+        $this->components->info(sprintf(
+            'All %d tenant table(s) enforce RLS, and role [%s] is subject to it.',
+            count($report->tenantTables),
+            $auditor->role()->name,
+        ));
+
+        return self::SUCCESS;
+    }
+
+    private function reportFailures(TableReport $report): void
+    {
+        if ($report->unisolated !== []) {
+            $this->components->error(sprintf('%d tenant table(s) not isolated:', count($report->unisolated)));
+
+            foreach ($report->unisolated as $table => $reason) {
+                $this->line("  - {$table}: {$reason}");
             }
 
             $this->newLine();
             $this->components->warn("Call SELECT enable_rls_for('<table>') (or RlsSchema::protect()) in the table's migration.");
+        }
+
+        if ($report->widened !== []) {
+            $this->components->error(sprintf(
+                '%d tenant table(s) with other PERMISSIVE policies, which Postgres ORs with tenant_isolation:',
+                count($report->widened),
+            ));
+
+            foreach ($report->widened as $table => $policies) {
+                $this->line("  - {$table}: ".implode(', ', $policies));
+            }
+
+            $this->newLine();
+            $this->components->warn('Drop them, or recreate them AS RESTRICTIVE so they can only narrow what tenant_isolation allows.');
         }
 
         if ($report->unstamped !== []) {
@@ -96,7 +127,35 @@ final class AuditCommand extends Command
                 .'or attach() and raw inserts fail the policy.'
             );
         }
+    }
 
-        return self::FAILURE;
+    private function reportWarnings(TableReport $report): void
+    {
+        if ($report->unindexed !== []) {
+            $this->components->warn(sprintf(
+                '%d tenant table(s) with no index starting with tenant_id, so every policy check scans the table:',
+                count($report->unindexed),
+            ));
+
+            foreach ($report->unindexed as $table) {
+                $this->line("  - {$table}");
+            }
+
+            $this->newLine();
+        }
+
+        if ($report->crossTenantUnique !== []) {
+            $this->components->warn(sprintf(
+                '%d tenant table(s) with unique indexes that leave out tenant_id. A duplicate insert fails with 23505 '
+                .'even when the existing row belongs to another tenant, which tells the caller it exists:',
+                count($report->crossTenantUnique),
+            ));
+
+            foreach ($report->crossTenantUnique as $table => $indexes) {
+                $this->line("  - {$table}: ".implode(', ', $indexes));
+            }
+
+            $this->newLine();
+        }
     }
 }

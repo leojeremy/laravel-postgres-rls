@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use LeoJeremy\PostgresRls\RlsContext;
+use Workbench\App\Jobs\CountVisibleNotes;
 use Workbench\App\Models\Note;
 use Workbench\App\Models\Tag;
 use Workbench\App\Models\Tenant;
@@ -68,10 +69,27 @@ final class DemoCommand extends Command
         $this->line('   '.($error ? strtok((string) $error->getPrevious()?->getMessage(), "\n") : 'The insert was accepted.'));
         $this->check($state === '42501', 'Rejected by the policy\'s WITH CHECK.');
 
-        $this->components->info('5. rls:audit as the app role');
+        $this->components->info('5. A job queued as Alpha, run later by a worker with no tenant set');
+        config(['queue.default' => 'database', 'queue.failed.driver' => 'null']);
+        $rls->within($alpha->id, fn () => CountVisibleNotes::dispatch());
+        $this->call('queue:work', ['connection' => 'database', '--once' => true]);
+        $this->line('   The job counted '.CountVisibleNotes::$lastCount.' note(s).');
+        $this->check(CountVisibleNotes::$lastCount === 2, 'The tenant travelled in the job payload.');
+
+        $this->components->info('6. rls:audit as the app role');
         $this->check($this->call('rls:audit') === self::SUCCESS, 'The audit passes.');
 
-        $this->components->info('6. rls:audit as a superuser, same database, same tables');
+        $this->components->info('7. One extra PERMISSIVE policy, added "for reporting"');
+        DB::statement('CREATE POLICY reports_read_all ON notes FOR SELECT USING (true)');
+        $leaked = $rls->within($alpha->id, fn () => DB::table('notes')->count());
+        $this->line("   Alpha now sees {$leaked} notes: Postgres ORs permissive policies together.");
+        $this->check(
+            $leaked === 3 && $this->call('rls:audit') === self::FAILURE,
+            'The leak is real, and the audit names the policy that causes it.',
+        );
+        DB::statement('DROP POLICY reports_read_all ON notes');
+
+        $this->components->info('8. rls:audit as a superuser, same database, same tables');
         $this->check(
             $this->call('rls:audit', ['--database' => 'pgsql_superuser']) === self::FAILURE,
             'The audit fails: a superuser skips every policy, FORCE or not.',

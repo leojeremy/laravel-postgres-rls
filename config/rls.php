@@ -1,6 +1,7 @@
 <?php
 
 declare(strict_types=1);
+use LeoJeremy\PostgresRls\Eloquent\StampsTenantId;
 
 return [
 
@@ -26,6 +27,16 @@ return [
     */
     'key_type' => env('RLS_KEY_TYPE', 'bigint'),
 
+    /*
+    | Carry the dispatching tenant into queued jobs (session mode does it
+    | automatically; transaction mode needs the RunAsDispatchingTenant job
+    | middleware). Set to false if stancl's QueueTenancyBootstrapper
+    | already does this for you.
+    */
+    'queue' => [
+        'propagate' => env('RLS_QUEUE_PROPAGATE', true),
+    ],
+
     'audit' => [
 
         // Schema whose tables rls:audit inspects.
@@ -45,6 +56,7 @@ return [
         ],
 
         'tenant_traits' => [
+            StampsTenantId::class,
             'Stancl\Tenancy\Database\Concerns\BelongsToTenant',
         ],
     ],

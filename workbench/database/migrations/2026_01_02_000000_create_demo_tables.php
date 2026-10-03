@@ -25,12 +25,17 @@ return new class extends Migration
             $table->foreignId('tenant_id')->constrained();
             $table->string('title');
             $table->timestamps();
+            // Postgres does not index foreign keys on its own, and every
+            // policy check filters on tenant_id.
+            $table->index('tenant_id');
         });
 
         Schema::create('tags', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('tenant_id')->constrained();
             $table->string('name');
+            // Unique per tenant, not globally: see rls:audit's warning.
+            $table->unique(['tenant_id', 'name']);
         });
 
         // A pivot: written by attach(), never by a model of its own.
@@ -39,6 +44,19 @@ return new class extends Migration
             $table->foreignId('tag_id')->constrained()->cascadeOnDelete();
             $table->foreignId('tenant_id')->constrained();
             $table->primary(['note_id', 'tag_id']);
+            $table->index('tenant_id');
+        });
+
+        // Laravel's database queue, for the demo's worker step. Central:
+        // no tenant_id, the payload carries the tenant instead.
+        Schema::create('jobs', function (Blueprint $table): void {
+            $table->id();
+            $table->string('queue')->index();
+            $table->longText('payload');
+            $table->unsignedTinyInteger('attempts');
+            $table->unsignedInteger('reserved_at')->nullable();
+            $table->unsignedInteger('available_at');
+            $table->unsignedInteger('created_at');
         });
 
         $rls = RlsSchema::on(DB::connection());
@@ -50,6 +68,7 @@ return new class extends Migration
 
     public function down(): void
     {
+        Schema::dropIfExists('jobs');
         Schema::dropIfExists('note_tag');
         Schema::dropIfExists('tags');
         Schema::dropIfExists('notes');

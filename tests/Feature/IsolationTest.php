@@ -72,3 +72,18 @@ it('rejects moving a row to another tenant with UPDATE', function (): void {
 
     expect($state)->toBe('42501');
 });
+
+it('fills tenant_id on the model too, with StampsTenantId', function (): void {
+    [$alpha] = $this->twoTenants();
+
+    $note = $this->rls()->within($alpha, fn () => Note::create(['title' => 'stamped']));
+
+    expect($note->tenant_id)->toBe($alpha->id);
+});
+
+it('leaves a model created with no tenant to the policy, which rejects it', function (): void {
+    $this->twoTenants();
+
+    expect(fn () => DB::transaction(fn () => Note::create(['title' => 'orphan'])))
+        ->toThrow(QueryException::class, 'violates row-level security policy');
+});

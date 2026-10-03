@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use LeoJeremy\PostgresRls\Facades\Rls;
+use Workbench\App\Models\Tenant;
 
 uses(RefreshDatabase::class);
 
@@ -101,4 +103,20 @@ it('nests a central block inside a central block', function (): void {
     ]);
 
     expect($seen)->toBe(['inner' => '', 'after' => '4']);
+});
+
+it('accepts the tenant model itself', function (): void {
+    [$alpha] = $this->twoTenants();
+
+    expect($this->rls()->within($alpha, fn (): string => $this->guc()))->toBe((string) $alpha->id);
+});
+
+it('refuses an unsaved tenant model', function (): void {
+    expect(fn () => $this->rls()->within(new Tenant, fn () => null))
+        ->toThrow(InvalidArgumentException::class, 'has no key yet');
+});
+
+it('is available through the Rls facade', function (): void {
+    expect(Rls::within(8, fn (): string => $this->guc()))->toBe('8')
+        ->and(Rls::currentKey())->toBeNull();
 });

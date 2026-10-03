@@ -98,3 +98,31 @@ it('rejects a key of the wrong type before it reaches the database', function ()
 
     expect($this->guc())->toBe('');
 });
+
+it('turns RLS off again with disable(), for down migrations', function (): void {
+    DB::statement('CREATE TABLE widgets (id bigserial PRIMARY KEY, tenant_id bigint NOT NULL)');
+    $rls = RlsSchema::on(DB::connection());
+
+    $rls->enable('widgets');
+    $rls->disable('widgets');
+    $rls->disable('widgets'); // safe to repeat
+
+    $flags = DB::selectOne("SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'widgets'");
+
+    expect(policiesOn('widgets'))->toBe([])
+        ->and($flags->relrowsecurity)->toBeFalse()
+        ->and($flags->relforcerowsecurity)->toBeFalse();
+});
+
+it('uninstalls the functions once no policy depends on them', function (): void {
+    $rls = RlsSchema::on(DB::connection());
+
+    foreach (['note_tag', 'tags', 'notes'] as $table) {
+        DB::statement("ALTER TABLE {$table} ALTER COLUMN tenant_id DROP DEFAULT");
+        $rls->disable($table);
+    }
+
+    $rls->uninstall();
+
+    expect(DB::scalar("SELECT count(*) FROM pg_proc WHERE proname IN ('current_tenant_id', 'enable_rls_for')"))->toBe(0);
+});
